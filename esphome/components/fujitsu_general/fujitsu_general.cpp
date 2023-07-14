@@ -9,7 +9,7 @@ namespace fujitsu_general {
   ((message)[(nibble) / 2] |= ((value) &0b00001111) << (((nibble) % 2) ? 0 : 4))
 #define GET_NIBBLE(message, nibble) (((message)[(nibble) / 2] >> (((nibble) % 2) ? 0 : 4)) & 0b00001111)
 
-static const char *const TAG = "fujitsu_general.climate";
+static const char *const TAG = "fujitsu_general_mod.climate";
 
 // Common header
 const uint8_t FUJITSU_GENERAL_COMMON_LENGTH = 6;
@@ -21,17 +21,18 @@ const uint8_t FUJITSU_GENERAL_COMMON_BYTE4 = 0x10;
 const uint8_t FUJITSU_GENERAL_MESSAGE_TYPE_BYTE = 5;
 
 // State message - temp & fan etc.
-const uint8_t FUJITSU_GENERAL_STATE_MESSAGE_LENGTH = 16;
-const uint8_t FUJITSU_GENERAL_MESSAGE_TYPE_STATE = 0xFE;
+const uint8_t FUJITSU_GENERAL_STATE_MESSAGE_LENGTH = 15;
+const uint8_t FUJITSU_GENERAL_MESSAGE_TYPE_STATE = 0xFC;
 
 // Util messages - off & eco etc.
-const uint8_t FUJITSU_GENERAL_UTIL_MESSAGE_LENGTH = 7;
+const uint8_t FUJITSU_GENERAL_UTIL_MESSAGE_LENGTH = 6;
 const uint8_t FUJITSU_GENERAL_MESSAGE_TYPE_OFF = 0x02;
 const uint8_t FUJITSU_GENERAL_MESSAGE_TYPE_ECONOMY = 0x09;
 const uint8_t FUJITSU_GENERAL_MESSAGE_TYPE_NUDGE = 0x6C;
+const uint8_t FUJITSU_GENERAL_MESSAGE_TYPE_SWING = 0x6D;
 
 // State header
-const uint8_t FUJITSU_GENERAL_STATE_HEADER_BYTE0 = 0x09;
+const uint8_t FUJITSU_GENERAL_STATE_HEADER_BYTE0 = 0x08;
 const uint8_t FUJITSU_GENERAL_STATE_HEADER_BYTE1 = 0x30;
 
 // State footer
@@ -73,21 +74,28 @@ const uint8_t FUJITSU_GENERAL_FAN_SILENT = 0x04;
 // const uint8_t FUJITSU_GENERAL_OUTDOOR_UNIT_LOW_NOISE_BYTE14 = 0xA0;
 // const uint8_t FUJITSU_GENERAL_STATE_BYTE14 = 0x20;
 
-const uint16_t FUJITSU_GENERAL_HEADER_MARK = 3300;
-const uint16_t FUJITSU_GENERAL_HEADER_SPACE = 1600;
+const uint16_t FUJITSU_GENERAL_BITWISE = 425;
+const uint16_t FUJITSU_GENERAL_HEADER_MARK = FUJITSU_GENERAL_BITWISE * 8;
+const uint16_t FUJITSU_GENERAL_HEADER_SPACE = FUJITSU_GENERAL_BITWISE * 4;
 
-const uint16_t FUJITSU_GENERAL_BIT_MARK = 420;
-const uint16_t FUJITSU_GENERAL_ONE_SPACE = 1200;
-const uint16_t FUJITSU_GENERAL_ZERO_SPACE = 420;
+const uint16_t FUJITSU_GENERAL_BIT_MARK = FUJITSU_GENERAL_BITWISE;
+const uint16_t FUJITSU_GENERAL_ONE_SPACE = FUJITSU_GENERAL_BITWISE * 3;
+const uint16_t FUJITSU_GENERAL_ZERO_SPACE = FUJITSU_GENERAL_BITWISE;
 
-const uint16_t FUJITSU_GENERAL_TRL_MARK = 420;
-const uint16_t FUJITSU_GENERAL_TRL_SPACE = 8000;
+const uint16_t FUJITSU_GENERAL_TRL_MARK = FUJITSU_GENERAL_BITWISE;
 
 const uint32_t FUJITSU_GENERAL_CARRIER_FREQUENCY = 38000;
 
 void FujitsuGeneralClimate::transmit_state() {
   if (this->mode == climate::CLIMATE_MODE_OFF) {
-    this->transmit_off_();
+    this->transmit_util_(FUJITSU_GENERAL_MESSAGE_TYPE_OFF);
+    return;
+  }
+
+  bool swing_off = this->swing_mode == climate::CLIMATE_SWING_OFF;
+  if (swing_off ^ !this->swing_)
+  {
+    this->transmit_util_(FUJITSU_GENERAL_MESSAGE_TYPE_SWING);
     return;
   }
 
@@ -104,9 +112,6 @@ void FujitsuGeneralClimate::transmit_state() {
   remote_state[5] = FUJITSU_GENERAL_MESSAGE_TYPE_STATE;
   remote_state[6] = FUJITSU_GENERAL_STATE_HEADER_BYTE0;
   remote_state[7] = FUJITSU_GENERAL_STATE_HEADER_BYTE1;
-
-  // unknown, does not appear to change with any remote settings
-  remote_state[14] = FUJITSU_GENERAL_STATE_FOOTER_BYTE0;
 
   // Set temperature
   uint8_t temperature_clamped =
@@ -160,23 +165,6 @@ void FujitsuGeneralClimate::transmit_state() {
       break;
   }
 
-  // Set swing
-  switch (this->swing_mode) {
-    case climate::CLIMATE_SWING_VERTICAL:
-      SET_NIBBLE(remote_state, FUJITSU_GENERAL_SWING_NIBBLE, FUJITSU_GENERAL_SWING_VERTICAL);
-      break;
-    case climate::CLIMATE_SWING_HORIZONTAL:
-      SET_NIBBLE(remote_state, FUJITSU_GENERAL_SWING_NIBBLE, FUJITSU_GENERAL_SWING_HORIZONTAL);
-      break;
-    case climate::CLIMATE_SWING_BOTH:
-      SET_NIBBLE(remote_state, FUJITSU_GENERAL_SWING_NIBBLE, FUJITSU_GENERAL_SWING_BOTH);
-      break;
-    case climate::CLIMATE_SWING_OFF:
-    default:
-      SET_NIBBLE(remote_state, FUJITSU_GENERAL_SWING_NIBBLE, FUJITSU_GENERAL_SWING_NONE);
-      break;
-  }
-
   // TODO: missing support for outdoor unit low noise
   // remote_state[14] = (byte) remote_state[14] | FUJITSU_GENERAL_OUTDOOR_UNIT_LOW_NOISE_BYTE14;
 
@@ -187,8 +175,8 @@ void FujitsuGeneralClimate::transmit_state() {
   this->power_ = true;
 }
 
-void FujitsuGeneralClimate::transmit_off_() {
-  ESP_LOGV(TAG, "Transmit off");
+void FujitsuGeneralClimate::transmit_util_(uint8_t type) {
+  ESP_LOGV(TAG, "Transmit util %X", type);
 
   uint8_t remote_state[FUJITSU_GENERAL_UTIL_MESSAGE_LENGTH] = {0};
 
@@ -197,8 +185,7 @@ void FujitsuGeneralClimate::transmit_off_() {
   remote_state[2] = FUJITSU_GENERAL_COMMON_BYTE2;
   remote_state[3] = FUJITSU_GENERAL_COMMON_BYTE3;
   remote_state[4] = FUJITSU_GENERAL_COMMON_BYTE4;
-  remote_state[5] = FUJITSU_GENERAL_MESSAGE_TYPE_OFF;
-  remote_state[6] = this->checksum_util_(remote_state);
+  remote_state[5] = type;
 
   this->transmit_(remote_state, FUJITSU_GENERAL_UTIL_MESSAGE_LENGTH);
 
@@ -229,7 +216,6 @@ void FujitsuGeneralClimate::transmit_(uint8_t const *message, uint8_t length) {
 
   // Footer
   data->mark(FUJITSU_GENERAL_TRL_MARK);
-  data->space(FUJITSU_GENERAL_TRL_SPACE);
 
   transmit.perform();
 }
@@ -279,6 +265,7 @@ bool FujitsuGeneralClimate::on_receive(remote_base::RemoteReceiveData data) {
     case FUJITSU_GENERAL_MESSAGE_TYPE_OFF:
     case FUJITSU_GENERAL_MESSAGE_TYPE_ECONOMY:
     case FUJITSU_GENERAL_MESSAGE_TYPE_NUDGE:
+    case FUJITSU_GENERAL_MESSAGE_TYPE_SWING:
       ESP_LOGV(TAG, "Received util message");
       recv_message_length = FUJITSU_GENERAL_UTIL_MESSAGE_LENGTH;
       break;
@@ -308,7 +295,7 @@ bool FujitsuGeneralClimate::on_receive(remote_base::RemoteReceiveData data) {
   if (recv_message_type == FUJITSU_GENERAL_MESSAGE_TYPE_STATE) {
     calculated_checksum = this->checksum_state_(recv_message);
   } else {
-    calculated_checksum = this->checksum_util_(recv_message);
+    calculated_checksum = recv_checksum;
   }
 
   if (recv_checksum != calculated_checksum) {
@@ -365,23 +352,6 @@ bool FujitsuGeneralClimate::on_receive(remote_base::RemoteReceiveData data) {
         break;
     }
 
-    const uint8_t recv_swing_mode = GET_NIBBLE(recv_message, FUJITSU_GENERAL_SWING_NIBBLE);
-    ESP_LOGV(TAG, "Received swing mode %X", recv_swing_mode);
-    switch (recv_swing_mode) {
-      case FUJITSU_GENERAL_SWING_VERTICAL:
-        this->swing_mode = climate::CLIMATE_SWING_VERTICAL;
-        break;
-      case FUJITSU_GENERAL_SWING_HORIZONTAL:
-        this->swing_mode = climate::CLIMATE_SWING_HORIZONTAL;
-        break;
-      case FUJITSU_GENERAL_SWING_BOTH:
-        this->swing_mode = climate::CLIMATE_SWING_BOTH;
-        break;
-      case FUJITSU_GENERAL_SWING_NONE:
-      default:
-        this->swing_mode = climate::CLIMATE_SWING_OFF;
-    }
-
     this->power_ = true;
   }
 
@@ -391,8 +361,14 @@ bool FujitsuGeneralClimate::on_receive(remote_base::RemoteReceiveData data) {
     this->power_ = false;
   }
 
+  else if (recv_message_type == FUJITSU_GENERAL_MESSAGE_TYPE_SWING) {
+    ESP_LOGV(TAG, "Received swing message");
+    this->swing_ = !this->swing_;
+    this->swing_mode = this->swing_ ? climate::CLIMATE_SWING_VERTICAL : climate::CLIMATE_SWING_OFF;
+  }
+
   else {
-    ESP_LOGV(TAG, "Received unsupprted message type %X", recv_message_type);
+    ESP_LOGV(TAG, "Received unsupported message type %X", recv_message_type);
     return false;
   }
 

@@ -53,14 +53,13 @@ class FujitsuGeneralClimate : public climate_ir::ClimateIR {
       : ClimateIR(FUJITSU_GENERAL_TEMP_MIN, FUJITSU_GENERAL_TEMP_MAX, 1.0f, true, true,
                   {climate::CLIMATE_FAN_AUTO, climate::CLIMATE_FAN_LOW, climate::CLIMATE_FAN_MEDIUM,
                    climate::CLIMATE_FAN_HIGH, climate::CLIMATE_FAN_QUIET},
-                  {climate::CLIMATE_SWING_OFF, climate::CLIMATE_SWING_VERTICAL, climate::CLIMATE_SWING_HORIZONTAL,
-                   climate::CLIMATE_SWING_BOTH}) {}
+                  {climate::CLIMATE_SWING_OFF, climate::CLIMATE_SWING_VERTICAL}) {}
 
  protected:
   /// Transmit via IR the state of this climate controller.
   void transmit_state() override;
-  /// Transmit via IR power off command.
-  void transmit_off_();
+  /// Transmit via IR power util command.
+  void transmit_util_(uint8_t type);
 
   /// Parse incoming message
   bool on_receive(remote_base::RemoteReceiveData data) override;
@@ -76,6 +75,9 @@ class FujitsuGeneralClimate : public climate_ir::ClimateIR {
 
   // true if currently on - fujitsus transmit an on flag on when the remote moves from off to on
   bool power_{false};
+
+  // true if currently active
+  bool swing_{false};
 };
 
 }  // namespace fujitsu_general
