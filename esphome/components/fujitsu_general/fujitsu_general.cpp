@@ -86,16 +86,28 @@ const uint16_t FUJITSU_GENERAL_TRL_MARK = FUJITSU_GENERAL_BITWISE;
 
 const uint32_t FUJITSU_GENERAL_CARRIER_FREQUENCY = 38000;
 
-void FujitsuGeneralClimate::transmit_state() {
-  if (this->mode == climate::CLIMATE_MODE_OFF) {
-    this->transmit_util_(FUJITSU_GENERAL_MESSAGE_TYPE_OFF);
+void FujitsuGeneralClimate::control(const climate::ClimateCall &call) {
+  if (call.get_swing_mode().has_value())
+  {
+    this->transmit_util_(FUJITSU_GENERAL_MESSAGE_TYPE_SWING);
     return;
   }
 
-  bool swing_off = this->swing_mode == climate::CLIMATE_SWING_OFF;
-  if (swing_off ^ !this->swing_)
-  {
-    this->transmit_util_(FUJITSU_GENERAL_MESSAGE_TYPE_SWING);
+  if (call.get_mode().has_value())
+    this->mode = *call.get_mode();
+  if (call.get_target_temperature().has_value())
+    this->target_temperature = *call.get_target_temperature();
+  if (call.get_fan_mode().has_value())
+    this->fan_mode = *call.get_fan_mode();
+  if (call.get_preset().has_value())
+    this->preset = *call.get_preset();
+  this->transmit_state();
+  this->publish_state();
+}
+
+void FujitsuGeneralClimate::transmit_state() {
+  if (this->mode == climate::CLIMATE_MODE_OFF) {
+    this->transmit_util_(FUJITSU_GENERAL_MESSAGE_TYPE_OFF);
     return;
   }
 
@@ -359,6 +371,8 @@ bool FujitsuGeneralClimate::on_receive(remote_base::RemoteReceiveData data) {
     ESP_LOGV(TAG, "Received off message");
     this->mode = climate::CLIMATE_MODE_OFF;
     this->power_ = false;
+    this->swing_ = false;
+    this->swing_mode = climate::CLIMATE_SWING_OFF;
   }
 
   else if (recv_message_type == FUJITSU_GENERAL_MESSAGE_TYPE_SWING) {

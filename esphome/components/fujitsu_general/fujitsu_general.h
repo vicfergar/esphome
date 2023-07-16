@@ -56,6 +56,8 @@ class FujitsuGeneralClimate : public climate_ir::ClimateIR {
                   {climate::CLIMATE_SWING_OFF, climate::CLIMATE_SWING_VERTICAL}) {}
 
  protected:
+  /// Override control to change settings of the climate device.
+  void control(const climate::ClimateCall &call) override;
   /// Transmit via IR the state of this climate controller.
   void transmit_state() override;
   /// Transmit via IR power util command.
